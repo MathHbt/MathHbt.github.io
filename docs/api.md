@@ -469,3 +469,232 @@ plug CORSPlug, origin: ["http://origin1.com", "http://origin2.com"]
 | userID    | `string`                             | URL               | **Obligatoire**. L'identifiant technique de l'utilisateur associé |
 | time      | `datetime - (format : "dd-MM-yyyy")` | Body              | **Obligatoire**. L'heure de la clock                              |
 | status    | `boolean`                            | Body              | **Obligatoire**. Le status de la clock                            |
+
+## Tests
+
+### Lancement des tests
+
+Phoenix permet de rédiger des tests avec une syntaxe particulière assez répétitive et simple à assimiler
+
+La commande ci-dessous permet de lancer les test :
+
+```sh
+mix test
+```
+
+### Rédaction des tests
+
+Pour rédiger les tests en Phoenix, nous allons dans le dossier *your_app/test/api_web/controllers*, un fichier par controller est déjà pré-généré, nous allons les supprimer pour rédiger les tests selon les specificités adéquates
+
+Créer un fichier **users_controller_test.exs**
+
+#### Imports requis
+
+```elixir
+# ConnCase to use database connection
+use ApiWeb.ConnCase, async: false
+
+# WebApiFixtures to generate fake data
+import Api.WebApiFixtures
+
+# Users model since we are building users_controller_test.exs
+alias Api.WebApi.Users
+```
+
+#### Déclaration des constantes de test
+
+Il est possible de créer des objets (JSON) contenant des constantes qui seront utilisées pour les tests
+
+```elixir
+@create_attrs %{
+  username: "dummy username",
+  email: "dummy@gmail.com"
+}
+
+@update_attrs %{
+  username: "dummy new username",
+  email: "newdummy@gmail.com"
+}
+
+@invalid_attrs %{
+  username: nil,
+  email: nil
+}
+
+@invalid_email %{
+  username: "any username",
+  email: "i have wrong format"
+}
+```
+
+#### Corps du test
+
+Pour rédiger un test, il faut ouvrir un block **test**
+
+Les différentes routes peuvent être testées grâce à cet appel :
+
+```elixir
+# method GET
+conn = get(conn, ~p"/api/users/#{userID}")
+
+# method POST
+conn = post(conn, ~p"/api/users", users: @create_attrs)
+
+# method PUT
+conn = put(conn, ~p"/api/users/#{userID}", users: @update_attrs)
+
+# method DELETE
+conn = delete(conn, ~p"/api/users/#{userID}")
+```
+
+Les traitements de resultat se font via des assertions similaires aux autres langages (comme JUnit par exemple) :
+
+```elixir
+
+# Declare constants for incoming tests
+@create_attrs %{
+  username: "dummy username",
+  email: "dummy@gmail.com"
+}
+
+# Describe the test
+test "| Should return 201 and a data field containing inserted user after inserting a user with correct body", %{conn: conn} do
+
+  # API self call, method: POST
+  conn = post(conn, ~p"/api/users", users: @create_attrs)
+
+  # Asserting wether the result is the excpected one or not
+  assert json_response(conn, 201)["data"] == %{
+    "id" => userID,
+    "username"=> "dummy username",
+    "email" => "dummy@gmail.com"
+  }
+end
+```
+
+```elixir
+# declare a new test with it's description
+test "| Should not create users and return 422 error because of invalid data", %{conn: conn} do
+
+  # API self call, method: POST
+  conn = post(conn, ~p"/api/users", users: @invalid_attrs)
+
+  # asserting wether the result is the excpected one or not
+  assert json_response(conn, 422)["errors"] != %{}
+end
+```
+
+#### Exemple avec un CRUD
+
+Ci-dessous un ensemble de test qui permet de valider le bon fonctionnement d'une table User ainsi que de son CRUD avec le schéma suivant :
+
+```javascript
+type User = {
+  id: integer,
+  username: string,
+  email: string
+}
+```
+
+```elixir
+defmodule ApiWeb.UsersControllerTest do
+  use ApiWeb.ConnCase, async: false
+
+  import Api.WebApiFixtures
+
+  alias Api.WebApi.Users
+
+  @create_attrs %{
+    username: "dummy username",
+    email: "dummy@gmail.com"
+  }
+
+  @update_attrs %{
+    username: "dummy new username",
+    email: "newdummy@gmail.com"
+  }
+
+  @invalid_attrs %{username: nil, email: nil}
+
+  @invalid_email %{username: "any username", email: "i have wrong format"}
+
+  setup %{conn: conn} do
+    {:ok, conn: put_req_header(conn, "accept", "application/json")}
+  end
+
+  describe "✓ Testing Users" do
+
+    setup [:create_users]
+
+    test "| Should return an array named data with status code 200", %{conn: conn} do
+      conn = get(conn, ~p"/api/users")
+      assert json_response(conn, 200)["data"]
+    end
+
+    test "| Should create user and return it's datas", %{conn: conn} do
+      conn = post(conn, ~p"/api/users", users: @create_attrs)
+      assert %{"id" => id} = json_response(conn, 201)["data"]
+
+      conn = get(conn, ~p"/api/users/#{id}")
+
+      assert %{
+               "id" => ^id,
+               "email" => "dummy@gmail.com",
+               "username" => "dummy username"
+             } = json_response(conn, 200)["data"]
+    end
+
+    test "| Should not create users and return 422 error because of invalid data", %{conn: conn} do
+      conn = post(conn, ~p"/api/users", users: @invalid_attrs)
+      assert json_response(conn, 422)["errors"] != %{}
+    end
+
+    test "| Should renders user when data is valid", %{conn: conn, users: %Users{id: id} = users} do
+      conn = put(conn, ~p"/api/users/#{users}", users: @update_attrs)
+      assert %{"id" => ^id} = json_response(conn, 200)["data"]
+
+      conn = get(conn, ~p"/api/users/#{id}")
+
+      assert %{
+               "id" => ^id,
+               "email" => "newdummy@gmail.com",
+               "username" => "dummy new username"
+             } = json_response(conn, 200)["data"]
+    end
+
+    test "| Should throw 422 if data is missing", %{conn: conn, users: users} do
+      conn = put(conn, ~p"/api/users/#{users}", users: @invalid_attrs)
+
+      assert json_response(conn, 422)["errors"] != %{
+               email: "can't be blank",
+               username: "can't be blank"
+             }
+    end
+
+    test "| Should warn that email format is invalid", %{conn: conn, users: users} do
+      conn = put(conn, ~p"/api/users/#{users}", users: @invalid_email)
+
+      assert json_response(conn, 422)["errors"] != %{
+               email: "can't be blank",
+               username: "can't be blank"
+             }
+    end
+
+    setup [:create_users]
+
+    test "| Should deletes user by id", %{conn: conn, users: users} do
+      conn = delete(conn, ~p"/api/users/#{users}")
+      assert response(conn, 200)
+
+      assert_error_sent(404, fn ->
+        get(conn, ~p"/api/users/#{users}")
+      end)
+    end
+  end
+
+  defp create_users(_) do
+    users = users_fixture()
+    %{users: users}
+  end
+end
+```
